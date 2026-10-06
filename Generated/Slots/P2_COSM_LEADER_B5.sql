@@ -1,0 +1,1 @@
+INSERT OR IGNORE INTO MAM_SlotBits (Slot, Kind, Bit) VALUES (2, 'COSM_LEADER', 5);

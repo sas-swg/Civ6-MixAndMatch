@@ -1,0 +1,1 @@
+INSERT OR IGNORE INTO MAM_SlotBits (Slot, Kind, Bit) VALUES (7, 'LEADER', 22);
