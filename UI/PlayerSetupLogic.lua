@@ -29,23 +29,38 @@ MAM_SLOT_KEYS = {
 };
 local MAM_SLOT_KEY_ORDER = { "CIV", "LEADER", "UNIT", "DISTRICT", "COSM_CIV", "COSM_LEADER", "MYSTERY" };
 
+function MAM_UnwrapVal(v)
+	while type(v) == "table" and v.Value ~= nil do
+		v = v.Value;
+	end
+	return v;
+end
+
 function MAM_IsBaseConstructorLeader(l)
-	if type(l) == "table" then l = l.Value; end
+	l = MAM_UnwrapVal(l);
 	return l == "LEADER_MAM_BLANK" or l == "LEADER_MAM_RANDOM";
 end
 
 function MAM_IsSlotLeader(l)
-	if type(l) == "table" then l = l.Value; end
+	l = MAM_UnwrapVal(l);
 	return type(l) == "string" and string.find(l, "^LEADER_MAM_P%d+$") ~= nil;
 end
 
 function MAM_IsMAMLeader(l)
-	if type(l) == "table" then l = l.Value; end
+	l = MAM_UnwrapVal(l);
 	return MAM_IsBaseConstructorLeader(l) or MAM_IsSlotLeader(l);
 end
 
+function MAM_IsConstructorLeader(l)
+	return MAM_IsMAMLeader(l);
+end
+
+function MAM_IsConstructorCiv(c)
+	return MAM_IsMAMCiv(c);
+end
+
 function MAM_SlotIndexFromLeader(l)
-	if type(l) == "table" then l = l.Value; end
+	l = MAM_UnwrapVal(l);
 	if type(l) == "string" then
 		local numStr = string.match(l, "^LEADER_MAM_P(%d+)$");
 		if numStr then return tonumber(numStr); end
@@ -151,15 +166,21 @@ function MAM_ApplySlotTypes(pid, baseLeader)
 			end
 			changed = true;
 		end
+		local isMystery = (cfg:GetValue("MAM_IS_MYSTERY") == "TRUE");
+		local hasCustomLeader = (cfg:GetValue("MAM_HAS_CUSTOM_COSM_LEADER") == "TRUE");
 		local chosenLeader = cfg:GetValue("MAM_COSMETIC_LEADER");
-		if chosenLeader == nil or chosenLeader == "" or chosenLeader == "NONE" or chosenLeader == "RANDOM" or MAM_IsConstructorLeader(chosenLeader) then
+		if isMystery and not hasCustomLeader and not g_MAM_Launching then
+			chosenLeader = "LEADER_MAM_BLANK";
+		elseif chosenLeader == nil or chosenLeader == "" or chosenLeader == "NONE" or chosenLeader == "RANDOM" or MAM_IsMAMLeader(chosenLeader) then
 			chosenLeader = cfg:GetValue("MAM_LEADER_ABILITY");
 		end
-		if chosenLeader ~= nil and chosenLeader ~= "" and chosenLeader ~= "NONE" and chosenLeader ~= "RANDOM" and not MAM_IsConstructorLeader(chosenLeader) then
+		if chosenLeader ~= nil and chosenLeader ~= "" and chosenLeader ~= "NONE" and chosenLeader ~= "RANDOM" and not MAM_IsMAMLeader(chosenLeader) then
 			local lRow = CachedQuery("SELECT LeaderName FROM Players WHERE LeaderType = ? LIMIT 1", chosenLeader);
 			if lRow and lRow[1] and lRow[1].LeaderName and cfg.SetLeaderName then
 				cfg:SetLeaderName(lRow[1].LeaderName);
 			end
+		elseif isMystery and not hasCustomLeader and cfg.SetLeaderName then
+			cfg:SetLeaderName(Locale.Lookup("LOC_LEADER_MAM_RANDOM_NAME"));
 		end
 	end);
 	if not ok then
@@ -1366,6 +1387,11 @@ function MAM_GetCosmeticCiv(specificPid)
 		end
 	end
 	local pConfig = PlayerConfigurations[targetPid];
+	local isMystery = pConfig and (pConfig:GetValue("MAM_IS_MYSTERY") == "TRUE");
+	local hasCustom = pConfig and (pConfig:GetValue("MAM_HAS_CUSTOM_COSM_CIV") == "TRUE");
+	if isMystery and not hasCustom and not g_MAM_Launching then
+		return "CIVILIZATION_MAM_BLANK";
+	end
 	local val = pConfig and pConfig:GetValue("MAM_COSMETIC_CIV");
 	if MAM_IsUnset(val) then
 		val = pConfig and pConfig:GetValue("MAM_CIV_ABILITY");
@@ -1386,6 +1412,11 @@ function MAM_GetCosmeticLeader(specificPid)
 		end
 	end
 	local pConfig = PlayerConfigurations[targetPid];
+	local isMystery = pConfig and (pConfig:GetValue("MAM_IS_MYSTERY") == "TRUE");
+	local hasCustom = pConfig and (pConfig:GetValue("MAM_HAS_CUSTOM_COSM_LEADER") == "TRUE");
+	if isMystery and not hasCustom and not g_MAM_Launching then
+		return "LEADER_MAM_BLANK";
+	end
 	local val = pConfig and pConfig:GetValue("MAM_COSMETIC_LEADER");
 	if MAM_IsUnset(val) then
 		val = pConfig and pConfig:GetValue("MAM_LEADER_ABILITY");
@@ -1549,12 +1580,18 @@ function MAM_ResolveRandomForPlayer(pid, usedCivs, usedLeaders, usedUnits, usedD
 	resolve("MAM_UNIQUE_DISTRICT", "MAM_UniqueDistricts", usedDistricts);
 
 	local isMystery = (pConfig:GetValue("MAM_IS_MYSTERY") == "TRUE");
+	local hasCustomCiv = (pConfig:GetValue("MAM_HAS_CUSTOM_COSM_CIV") == "TRUE");
+	local hasCustomLeader = (pConfig:GetValue("MAM_HAS_CUSTOM_COSM_LEADER") == "TRUE");
 
 	local cosmCiv = pConfig:GetValue("MAM_COSMETIC_CIV");
-	if MAM_IsUnset(cosmCiv) or MAM_IsMAMCiv(cosmCiv) then
+	if isMystery and not hasCustomCiv and not (bApplySlots or g_MAM_Launching) then
+		setv("MAM_COSMETIC_CIV", "CIVILIZATION_MAM_BLANK");
+	elseif MAM_IsUnset(cosmCiv) or MAM_IsMAMCiv(cosmCiv) then
 		local target;
 		if isMystery then
-			target = MAM_RollRandomBonus("MAM_CivAbilities", {});
+			if bApplySlots or g_MAM_Launching then
+				target = MAM_RollRandomBonus("MAM_CivAbilities", {});
+			end
 		elseif curCiv ~= "NONE" then
 			target = curCiv;
 		elseif isRandomLeader then
@@ -1571,10 +1608,14 @@ function MAM_ResolveRandomForPlayer(pid, usedCivs, usedLeaders, usedUnits, usedD
 	end
 
 	local cosmLeader = pConfig:GetValue("MAM_COSMETIC_LEADER");
-	if MAM_IsUnset(cosmLeader) or MAM_IsMAMLeader(cosmLeader) then
+	if isMystery and not hasCustomLeader and not (bApplySlots or g_MAM_Launching) then
+		setv("MAM_COSMETIC_LEADER", "LEADER_MAM_BLANK");
+	elseif MAM_IsUnset(cosmLeader) or MAM_IsMAMLeader(cosmLeader) then
 		local target;
 		if isMystery then
-			target = MAM_RollRandomBonus("MAM_LeaderAbilities", {});
+			if bApplySlots or g_MAM_Launching then
+				target = MAM_RollRandomBonus("MAM_LeaderAbilities", {});
+			end
 		elseif curLeader ~= "NONE" then
 			target = curLeader;
 		elseif isRandomLeader then
@@ -1963,6 +2004,7 @@ local _GetPlayerIconsDefaultValue = {
 };
 
 function GetPlayerIcons(domain, leader_type, specificPid)
+	leader_type = MAM_UnwrapVal(leader_type);
 	if (leader_type == "RANDOM_POOL1") then
 		return {
 			LeaderIcon = "ICON_LEADER_RANDOM_POOL_1",
@@ -1990,21 +2032,36 @@ function GetPlayerIcons(domain, leader_type, specificPid)
 				PlayerColor = "COLOR_MAM_PRIMARY"
 			};
 		end
+		local pConfig = PlayerConfigurations[targetPid];
+		local isMystery = pConfig and (pConfig:GetValue("MAM_IS_MYSTERY") == "TRUE");
+		local hasCustomCiv = pConfig and (pConfig:GetValue("MAM_HAS_CUSTOM_COSM_CIV") == "TRUE");
+		local hasCustomLeader = pConfig and (pConfig:GetValue("MAM_HAS_CUSTOM_COSM_LEADER") == "TRUE");
+
 		local cosmCiv = MAM_GetCosmeticCiv(targetPid);
 		local cosmLeader = MAM_GetCosmeticLeader(targetPid);
-		local civIcon = "ICON_" .. cosmCiv;
-		local leaderIcon = "ICON_" .. cosmLeader;
-		local playerColor = (slotPid ~= nil) and ("LEADER_MAM_P" .. tostring(slotPid)) or cosmLeader;
+		local civIcon = "ICON_CIVILIZATION_UNKNOWN";
+		local leaderIcon = "ICON_LEADER_DEFAULT";
+		local playerColor = (slotPid ~= nil) and ("LEADER_MAM_P" .. tostring(slotPid)) or "COLOR_MAM_PRIMARY";
 
-		local civQuery = CachedQuery("SELECT CivilizationIcon FROM Players WHERE CivilizationType = ? LIMIT 1", cosmCiv);
-		if civQuery and #civQuery > 0 and civQuery[1] and civQuery[1].CivilizationIcon then
-			civIcon = civQuery[1].CivilizationIcon;
+		if not isMystery or hasCustomCiv then
+			if not MAM_IsUnset(cosmCiv) and not MAM_IsMAMCiv(cosmCiv) then
+				civIcon = "ICON_" .. cosmCiv;
+				local civQuery = CachedQuery("SELECT CivilizationIcon FROM Players WHERE CivilizationType = ? LIMIT 1", cosmCiv);
+				if civQuery and civQuery[1] and civQuery[1].CivilizationIcon then
+					civIcon = civQuery[1].CivilizationIcon;
+				end
+			end
 		end
 
-		local leadQuery = CachedQuery("SELECT LeaderIcon, PlayerColor FROM Players WHERE LeaderType = ? LIMIT 1", cosmLeader);
-		if leadQuery and #leadQuery > 0 and leadQuery[1] then
-			if leadQuery[1].LeaderIcon then leaderIcon = leadQuery[1].LeaderIcon; end
-			if leadQuery[1].PlayerColor then playerColor = leadQuery[1].PlayerColor; end
+		if not isMystery or hasCustomLeader then
+			if not MAM_IsUnset(cosmLeader) and not MAM_IsMAMLeader(cosmLeader) then
+				leaderIcon = "ICON_" .. cosmLeader;
+				local leadQuery = CachedQuery("SELECT LeaderIcon, PlayerColor FROM Players WHERE LeaderType = ? LIMIT 1", cosmLeader);
+				if leadQuery and leadQuery[1] then
+					if leadQuery[1].LeaderIcon then leaderIcon = leadQuery[1].LeaderIcon; end
+					if leadQuery[1].PlayerColor then playerColor = leadQuery[1].PlayerColor; end
+				end
+			end
 		end
 
 		return {
@@ -2047,6 +2104,7 @@ function GetPlayerIcons(domain, leader_type, specificPid)
 end
 
 function GetPlayerInfo(domain, leader_type, specificPid)
+	leader_type = MAM_UnwrapVal(leader_type);
 	if(leader_type ~= "RANDOM" and leader_type ~= "RANDOM_POOL1" and leader_type ~= "RANDOM_POOL2") then
 		local info_query = "SELECT CivilizationIcon, LeaderIcon, LeaderName, CivilizationName, LeaderAbilityName, LeaderAbilityDescription, LeaderAbilityIcon, CivilizationAbilityName, CivilizationAbilityDescription, CivilizationAbilityIcon, Portrait, PortraitBackground, PlayerColor from Players where Domain = ? and LeaderType = ? LIMIT 1";
 		local item_query = "SELECT Type, Name, Description, Icon, SortIndex from PlayerItems where Domain = ? and LeaderType = ?";
@@ -2097,11 +2155,23 @@ function GetPlayerInfo(domain, leader_type, specificPid)
 				end
 				info.TargetPlayerId = targetPid;
 				if targetPid >= 0 then
+					local pConfig = PlayerConfigurations[targetPid];
+					local isMystery = pConfig and (pConfig:GetValue("MAM_IS_MYSTERY") == "TRUE");
+					local hasCustomCiv = pConfig and (pConfig:GetValue("MAM_HAS_CUSTOM_COSM_CIV") == "TRUE");
+					local hasCustomLeader = pConfig and (pConfig:GetValue("MAM_HAS_CUSTOM_COSM_LEADER") == "TRUE");
+
 					local cosmCiv = MAM_GetCosmeticCiv(targetPid);
 					local cosmLeader = MAM_GetCosmeticLeader(targetPid);
-					local lRows = CachedQuery("SELECT LeaderName, Portrait, PortraitBackground, LeaderIcon, PlayerColor FROM Players WHERE LeaderType = ? LIMIT 1", cosmLeader);
-					local cRows = CachedQuery("SELECT CivilizationName, CivilizationIcon FROM Players WHERE CivilizationType = ? LIMIT 1", cosmCiv);
-					if lRows and lRows[1] then
+					local lRows = (not isMystery or hasCustomLeader) and CachedQuery("SELECT LeaderName, Portrait, PortraitBackground, LeaderIcon, PlayerColor FROM Players WHERE LeaderType = ? LIMIT 1", cosmLeader) or nil;
+					local cRows = (not isMystery or hasCustomCiv) and CachedQuery("SELECT CivilizationName, CivilizationIcon FROM Players WHERE CivilizationType = ? LIMIT 1", cosmCiv) or nil;
+
+					if isMystery and not hasCustomLeader then
+						info.LeaderIcon = "ICON_LEADER_DEFAULT";
+						info.LeaderName = "LOC_LEADER_MAM_RANDOM_NAME";
+						info.Portrait = nil;
+						info.PortraitBackground = nil;
+						info.PlayerColor = (slotPid ~= nil and ("LEADER_MAM_P" .. tostring(slotPid)) or "COLOR_MAM_PRIMARY");
+					elseif lRows and lRows[1] then
 						if lRows[1].LeaderName then info.LeaderName = lRows[1].LeaderName; end
 						if lRows[1].Portrait then info.Portrait = lRows[1].Portrait; end
 						if lRows[1].PortraitBackground then info.PortraitBackground = lRows[1].PortraitBackground; end
@@ -2110,7 +2180,11 @@ function GetPlayerInfo(domain, leader_type, specificPid)
 					else
 						info.PlayerColor = (slotPid ~= nil and ("LEADER_MAM_P" .. tostring(slotPid)) or cosmLeader);
 					end
-					if cRows and cRows[1] then
+
+					if isMystery and not hasCustomCiv then
+						info.CivilizationIcon = "ICON_CIVILIZATION_UNKNOWN";
+						info.CivilizationName = "LOC_MAM_CIV_RANDOM_NAME";
+					elseif cRows and cRows[1] then
 						if cRows[1].CivilizationName then info.CivilizationName = cRows[1].CivilizationName; end
 						if cRows[1].CivilizationIcon then info.CivilizationIcon = cRows[1].CivilizationIcon; end
 					end
@@ -2429,7 +2503,7 @@ function DisplayCivLeaderToolTip(info, tooltipControls, alwaysHide, bForceHide)
 		end
 		return;
 	end
-	if g_MAM_DirectShow == true or MAM_CARD_HOVER_DELAY <= 0 or not (ContextPtr and ContextPtr.SetUpdate) then
+	if isConstructor or g_MAM_DirectShow == true or MAM_CARD_HOVER_DELAY <= 0 or not (ContextPtr and ContextPtr.SetUpdate) then
 		MAM_ShowCardNow(info, tooltipControls, false, false);
 		return;
 	end
@@ -2538,6 +2612,7 @@ function SetMAMConstructorData(info:table, tooltipControls:table)
 			MAM_AddButton(tooltipControls.InfoStack, Locale.Lookup("LOC_MAM_UI_REROLL_NOW"), function()
 				MAM_RollRandomAll(targetPid);
 				g_MAM_ConfiguringPlayerId = targetPid; SetMAMConstructorData(info, tooltipControls);
+				if VisualizePlayerParameters then VisualizePlayerParameters(); elseif GameSetup_RefreshParameters then GameSetup_RefreshParameters(); end
 			end, false);
 
 			MAM_AddButton(tooltipControls.InfoStack, Locale.Lookup("LOC_MAM_UI_MYSTERY_RANDOM"), function()
@@ -2561,6 +2636,7 @@ function SetMAMConstructorData(info:table, tooltipControls:table)
 				MAM_SetConfig("MAM_HAS_CUSTOM_COSM_LEADER", "FALSE", targetPid);
 				MAM_SetConfig("MAM_IS_MYSTERY", "TRUE", targetPid);
 				g_MAM_ConfiguringPlayerId = targetPid; SetMAMConstructorData(info, tooltipControls);
+				if VisualizePlayerParameters then VisualizePlayerParameters(); elseif GameSetup_RefreshParameters then GameSetup_RefreshParameters(); end
 			end, false);
 
 			MAM_AddButton(tooltipControls.InfoStack, Locale.Lookup("LOC_MAM_UI_CLEAR_ALL"), function()
@@ -2574,6 +2650,7 @@ function SetMAMConstructorData(info:table, tooltipControls:table)
 				MAM_SetConfig("MAM_HAS_CUSTOM_COSM_LEADER", "FALSE", targetPid);
 				MAM_SetConfig("MAM_IS_MYSTERY", "FALSE", targetPid);
 				g_MAM_ConfiguringPlayerId = targetPid; SetMAMConstructorData(info, tooltipControls);
+				if VisualizePlayerParameters then VisualizePlayerParameters(); elseif GameSetup_RefreshParameters then GameSetup_RefreshParameters(); end
 			end, false);
 		end
 
@@ -3020,8 +3097,17 @@ function SetMAMConstructorData(info:table, tooltipControls:table)
 end
 
 function SetUniqueCivLeaderData(info:table, tooltipControls:table)
+	local lt = MAM_UnwrapVal(info and info.LeaderType);
+	local ct = MAM_UnwrapVal(info and info.CivilizationType);
+	local ln = MAM_UnwrapVal(info and info.LeaderName);
+	local cn = MAM_UnwrapVal(info and info.CivilizationName);
+	local isMAM = (lt and MAM_IsMAMLeader(lt)) or (ct and MAM_IsMAMCiv(ct))
+		or (lt and string.find(tostring(lt), "MAM") ~= nil)
+		or (ct and string.find(tostring(ct), "MAM") ~= nil)
+		or (ln and string.find(tostring(ln), "MAM") ~= nil)
+		or (cn and string.find(tostring(cn), "MAM") ~= nil);
 
-	if (info and MAM_IsMAMLeader(info.LeaderType)) then
+	if isMAM then
 		return SetMAMConstructorData(info, tooltipControls);
 	end
 
@@ -3072,42 +3158,44 @@ function SetUniqueCivLeaderData(info:table, tooltipControls:table)
 		hasLeaderPlacard = true;
 	end
 
-	if (info.LeaderAbility) then
-		local leaderHeader = tooltipControls.HeaderIM:GetInstance();
-		leaderHeader.Header:SetText(Locale.ToUpper(Locale.Lookup(info.LeaderName)));
-		local leaderAbility = tooltipControls.HeaderIconIM:GetInstance();
-		leaderAbility.Icon:SetIcon(info.LeaderIcon);
-		leaderAbility.Header:SetText(Locale.ToUpper(Locale.Lookup(info.LeaderAbility.Name)));
-		leaderAbility.Description:LocalizeAndSetText(info.LeaderAbility.Description);
-	end
-	if (info.CivilizationAbility) then
-		local civHeader = tooltipControls.HeaderIM:GetInstance();
-		civHeader.Header:SetText(Locale.ToUpper(Locale.Lookup(info.CivilizationName)));
-		local civAbility = tooltipControls.CivHeaderIconIM:GetInstance();
+	if not isMAM then
+		if (info.LeaderAbility) then
+			local leaderHeader = tooltipControls.HeaderIM:GetInstance();
+			leaderHeader.Header:SetText(Locale.ToUpper(Locale.Lookup(info.LeaderName)));
+			local leaderAbility = tooltipControls.HeaderIconIM:GetInstance();
+			leaderAbility.Icon:SetIcon(info.LeaderIcon);
+			leaderAbility.Header:SetText(Locale.ToUpper(Locale.Lookup(info.LeaderAbility.Name)));
+			leaderAbility.Description:LocalizeAndSetText(info.LeaderAbility.Description);
+		end
+		if (info.CivilizationAbility) then
+			local civHeader = tooltipControls.HeaderIM:GetInstance();
+			civHeader.Header:SetText(Locale.ToUpper(Locale.Lookup(info.CivilizationName)));
+			local civAbility = tooltipControls.CivHeaderIconIM:GetInstance();
 
-		civAbility.Icon:SetIcon(info.CivilizationIcon);
+			civAbility.Icon:SetIcon(info.CivilizationIcon);
 
-		local backColor, frontColor = UI.GetPlayerColorValues(info.PlayerColor, info.PlayerColorIndex or 0);
-		if(backColor and frontColor and backColor ~= 0 and frontColor ~= 0) then
-			civAbility.Icon:SetColor(frontColor);
-			civAbility.IconBG:SetColor(backColor);
+			local backColor, frontColor = UI.GetPlayerColorValues(info.PlayerColor, info.PlayerColorIndex or 0);
+			if(backColor and frontColor and backColor ~= 0 and frontColor ~= 0) then
+				civAbility.Icon:SetColor(frontColor);
+				civAbility.IconBG:SetColor(backColor);
+			end
+
+
+			civAbility.Header:SetText(Locale.ToUpper(Locale.Lookup(info.CivilizationAbility.Name)));
+			civAbility.Description:LocalizeAndSetText(info.CivilizationAbility.Description);
+			hasTooltipInfo = true;
 		end
 
-
-		civAbility.Header:SetText(Locale.ToUpper(Locale.Lookup(info.CivilizationAbility.Name)));
-		civAbility.Description:LocalizeAndSetText(info.CivilizationAbility.Description);
-		hasTooltipInfo = true;
-	end
-
-	if (info.Uniques) then
-		for _, item in ipairs(info.Uniques) do
-			local instance:table = {};
-			instance = tooltipControls.UniqueIconIM:GetInstance();
-			instance.Icon:SetIcon(item.Icon);
-			local headerText:string = Locale.ToUpper(Locale.Lookup( item.Name ));
-			instance.Header:SetText( headerText );
-			instance.Description:SetText(Locale.Lookup(item.Description));
-			hasTooltipInfo = true;
+		if (info.Uniques) then
+			for _, item in ipairs(info.Uniques) do
+				local instance:table = {};
+				instance = tooltipControls.UniqueIconIM:GetInstance();
+				instance.Icon:SetIcon(item.Icon);
+				local headerText:string = Locale.ToUpper(Locale.Lookup( item.Name ));
+				instance.Header:SetText( headerText );
+				instance.Description:SetText(Locale.Lookup(item.Description));
+				hasTooltipInfo = true;
+			end
 		end
 	end
 
@@ -3382,9 +3470,11 @@ function SetupLeaderPulldown(
 			local colorParameter = parameters.Parameters["PlayerColorAlternate"];
 			local colorIndex = colorParameter and colorParameter.Value or 0;
 
+			local pConfig = PlayerConfigurations[playerId];
+			local isMysteryNow = pConfig and (pConfig:GetValue("MAM_IS_MYSTERY") == "TRUE");
 			if(	ValuesMatch(leaderParameter.Value, cache.PlayerValue) and
 				ValuesMatch(colorIndex, cache.PlayerColorValue) and
-				(leaderParameter.Value == nil or not MAM_IsMAMLeader(leaderParameter.Value) or (cache.MAMCosmCiv == MAM_GetCosmeticCiv(playerId) and cache.MAMCosmLeader == MAM_GetCosmeticLeader(playerId)))) then
+				(leaderParameter.Value == nil or not MAM_IsMAMLeader(leaderParameter.Value) or (cache.MAMIsMystery == isMysteryNow and cache.MAMCosmCiv == MAM_GetCosmeticCiv(playerId) and cache.MAMCosmLeader == MAM_GetCosmeticLeader(playerId)))) then
 				refresh = false;
 			end
 
@@ -3420,10 +3510,13 @@ function SetupLeaderPulldown(
 						local cosmCiv = MAM_GetCosmeticCiv(playerId);
 						local cosmLeader = MAM_GetCosmeticLeader(playerId);
 						local pConfig = PlayerConfigurations[playerId];
+						local isMystery = pConfig and (pConfig:GetValue("MAM_IS_MYSTERY") == "TRUE");
 						local civAbil = pConfig and pConfig:GetValue("MAM_CIV_ABILITY");
 						local leadAbil = pConfig and pConfig:GetValue("MAM_LEADER_ABILITY");
 						local leaderBaseName = Locale.Lookup((type(v)=="table" and v.Value or v) == "LEADER_MAM_RANDOM" and "LOC_MAM_LEADER_RANDOM_NAME" or "LOC_MAM_LEADER_NAME");
-						if civAbil == "RANDOM" or leadAbil == "RANDOM" then
+						if isMystery then
+							caption = leaderBaseName .. ": ❓ " .. Locale.Lookup("LOC_MAM_UI_MYSTERY_HIDDEN");
+						elseif civAbil == "RANDOM" or leadAbil == "RANDOM" then
 							caption = leaderBaseName .. ": " .. Locale.Lookup("LOC_MAM_RANDOM_NAME");
 						elseif (civAbil == "NONE" or civAbil == nil or civAbil == "") and (leadAbil == "NONE" or leadAbil == nil or leadAbil == "") then
 							caption = leaderBaseName .. " (" .. Locale.Lookup("LOC_MAM_NONE_NAME") .. ")";
@@ -3434,6 +3527,7 @@ function SetupLeaderPulldown(
 							local lName = (lNameRow and lNameRow[1] and lNameRow[1].LeaderName) or cosmLeader;
 							caption = leaderBaseName .. ": " .. Locale.Lookup(lName) .. " (" .. Locale.Lookup(cName) .. ")";
 						end
+						cache.MAMIsMystery = isMystery;
 						cache.MAMCosmCiv = cosmCiv;
 						cache.MAMCosmLeader = cosmLeader;
 					end
