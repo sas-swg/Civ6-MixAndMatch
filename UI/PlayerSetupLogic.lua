@@ -30,15 +30,27 @@ MAM_SLOT_KEYS = {
 local MAM_SLOT_KEY_ORDER = { "CIV", "LEADER", "UNIT", "DISTRICT", "COSM_CIV", "COSM_LEADER", "MYSTERY" };
 
 function MAM_IsBaseConstructorLeader(l)
+	if type(l) == "table" then l = l.Value; end
 	return l == "LEADER_MAM_BLANK" or l == "LEADER_MAM_RANDOM";
 end
 
 function MAM_IsSlotLeader(l)
+	if type(l) == "table" then l = l.Value; end
 	return type(l) == "string" and string.find(l, "^LEADER_MAM_P%d+$") ~= nil;
 end
 
 function MAM_IsMAMLeader(l)
+	if type(l) == "table" then l = l.Value; end
 	return MAM_IsBaseConstructorLeader(l) or MAM_IsSlotLeader(l);
+end
+
+function MAM_SlotIndexFromLeader(l)
+	if type(l) == "table" then l = l.Value; end
+	if type(l) == "string" then
+		local numStr = string.match(l, "^LEADER_MAM_P(%d+)$");
+		if numStr then return tonumber(numStr); end
+	end
+	return nil;
 end
 
 function MAM_Trace(msg)
@@ -764,9 +776,10 @@ end
 function MAM_ApplyPlayerRowIcons(playerId, instance)
 	pcall(function()
 		local pConfig = PlayerConfigurations[playerId];
-		local lType = pConfig and MAM_LeaderOf(pConfig);
-		if lType and (lType == "LEADER_MAM_BLANK" or lType == "LEADER_MAM_RANDOM") then
-			local icons = GetPlayerIcons("Players:StandardPlayers", lType, playerId);
+		local lType = pConfig and (pConfig:GetLeaderTypeName() or MAM_LeaderOf(pConfig));
+		if lType and MAM_IsMAMLeader(lType) then
+			local domain = MAM_IsSlotLeader(lType) and "Players:MAM_Slots" or "Players:StandardPlayers";
+			local icons = GetPlayerIcons(domain, lType, playerId);
 			local lIcon = instance and (instance["LeaderIcon"] or (instance.PlayerPullDown and (instance.PlayerPullDown.LeaderIcon or (instance.PlayerPullDown.GetButton and instance.PlayerPullDown:GetButton().LeaderIcon))));
 			if lIcon and icons and icons.LeaderIcon then
 				lIcon:SetIcon(icons.LeaderIcon);
@@ -803,12 +816,12 @@ function MAM_BindPlayerLeaderControls(playerId, instance)
 			if button == nil then return; end
 			button:RegisterCallback(Mouse.eMouseEnter, function()
 				local pConfig = PlayerConfigurations[playerId];
-				local lType = pConfig and MAM_LeaderOf(pConfig) or vVal or "LEADER_MAM_BLANK";
-				local domain = vDom or "Players:StandardPlayers";
+				local lType = pConfig and (pConfig:GetLeaderTypeName() or MAM_LeaderOf(pConfig)) or vVal or "LEADER_MAM_BLANK";
+				local domain = vDom or (MAM_IsSlotLeader(lType) and "Players:MAM_Slots" or "Players:StandardPlayers");
 				local info = GetPlayerInfo(domain, lType, playerId);
 				if info == nil then info = { LeaderType = lType, TargetPlayerId = playerId }; end
 				info.TargetPlayerId = playerId;
-				if lType == "LEADER_MAM_BLANK" or lType == "LEADER_MAM_RANDOM" then
+				if MAM_IsMAMLeader(lType) then
 					m_currentInfo = info;
 					g_MAM_ConfiguringPlayerId = playerId;
 				end
@@ -932,7 +945,7 @@ function GetPlayerParameterError(playerId)
 					if(isPreGame) then
 						if(max_unique_players and (unique_leaders or unique_civilizations)) then
 							if(player_count > max_unique_players) then
-								if not (pPlayerConfig and (MAM_LeaderOf(pPlayerConfig) == "LEADER_MAM_BLANK" or MAM_LeaderOf(pPlayerConfig) == "LEADER_MAM_RANDOM")) then
+								if not (pPlayerConfig and MAM_IsMAMLeader(pPlayerConfig:GetLeaderTypeName())) then
 									print("Player Count - " .. player_count .. " Max Unique Players - " .. max_unique_players);
 									return {Reason="LOC_SETUP_PLAYER_PARAMETER_ERROR"};
 								end
@@ -944,7 +957,7 @@ function GetPlayerParameterError(playerId)
 					if(pPlayerConfig ~= nil and not pPlayerConfig:IsParticipant()) then
 						return nil;
 					else
-						if (pPlayerConfig and (MAM_LeaderOf(pPlayerConfig) == "LEADER_MAM_BLANK" or MAM_LeaderOf(pPlayerConfig) == "LEADER_MAM_RANDOM")) then
+						if (pPlayerConfig and MAM_IsMAMLeader(pPlayerConfig:GetLeaderTypeName())) then
 							if playerLeader.Error and (playerLeader.Error.Reason == "LOC_SETUP_ERROR_NO_DUPLICATE_LEADERS" or playerLeader.Error.Reason == "LOC_SETUP_ERROR_NO_DUPLICATE_CIVILIZATIONS") then
 								return nil;
 							end
@@ -1662,9 +1675,11 @@ function MAM_InstallGameStartHooks()
 						end
 					end
 					if playerId == MAM_GetLocalPlayerId() and tooltipControls ~= nil then
-						if lType == "LEADER_MAM_RANDOM" or lType == "LEADER_MAM_BLANK" then
-							local pInfo = GetPlayerInfo("Players:StandardPlayers", lType, playerId);
+						if MAM_IsMAMLeader(lType) then
+							local domain = MAM_IsSlotLeader(lType) and "Players:MAM_Slots" or "Players:StandardPlayers";
+							local pInfo = GetPlayerInfo(domain, lType, playerId);
 							if pInfo then
+								pInfo.TargetPlayerId = playerId;
 								m_currentInfo = pInfo;
 								m_MAM_LastInfo = pInfo;
 								if not m_MAM_WindowClosed then
@@ -1958,8 +1973,9 @@ function GetPlayerIcons(domain, leader_type, specificPid)
 			LeaderIcon = "ICON_LEADER_RANDOM_POOL_2",
 			CivIcon = "ICON_CIVILIZATION_UNKNOWN"
 		};
-	elseif (leader_type == "LEADER_MAM_BLANK" or leader_type == "LEADER_MAM_RANDOM") then
-		local targetPid = specificPid or g_MAM_RowPid;
+	elseif MAM_IsMAMLeader(leader_type) then
+		local slotPid = MAM_SlotIndexFromLeader(leader_type);
+		local targetPid = slotPid or specificPid or g_MAM_RowPid;
 		if targetPid == nil or targetPid < 0 then
 			if g_MAM_InTooltip and g_MAM_ConfiguringPlayerId ~= nil and g_MAM_ConfiguringPlayerId >= 0 then
 				targetPid = g_MAM_ConfiguringPlayerId;
@@ -1978,7 +1994,7 @@ function GetPlayerIcons(domain, leader_type, specificPid)
 		local cosmLeader = MAM_GetCosmeticLeader(targetPid);
 		local civIcon = "ICON_" .. cosmCiv;
 		local leaderIcon = "ICON_" .. cosmLeader;
-		local playerColor = cosmLeader;
+		local playerColor = (slotPid ~= nil) and ("LEADER_MAM_P" .. tostring(slotPid)) or cosmLeader;
 
 		local civQuery = CachedQuery("SELECT CivilizationIcon FROM Players WHERE CivilizationType = ? LIMIT 1", cosmCiv);
 		if civQuery and #civQuery > 0 and civQuery[1] and civQuery[1].CivilizationIcon then
@@ -2068,9 +2084,10 @@ function GetPlayerInfo(domain, leader_type, specificPid)
 				abilities.CivilizationAbilityIcon = row.CivilizationAbilityIcon;
 			end
 
-			local targetPid = specificPid or g_MAM_RowPid;
+			local slotPid = MAM_SlotIndexFromLeader(leader_type);
+			local targetPid = slotPid or specificPid or g_MAM_RowPid;
 			info.TargetPlayerId = targetPid;
-			if (leader_type == "LEADER_MAM_BLANK" or leader_type == "LEADER_MAM_RANDOM") then
+			if MAM_IsMAMLeader(leader_type) then
 				if targetPid == nil or targetPid < 0 then
 					if g_MAM_InTooltip and g_MAM_ConfiguringPlayerId ~= nil and g_MAM_ConfiguringPlayerId >= 0 then
 						targetPid = g_MAM_ConfiguringPlayerId;
@@ -2089,9 +2106,9 @@ function GetPlayerInfo(domain, leader_type, specificPid)
 						if lRows[1].Portrait then info.Portrait = lRows[1].Portrait; end
 						if lRows[1].PortraitBackground then info.PortraitBackground = lRows[1].PortraitBackground; end
 						if lRows[1].LeaderIcon then info.LeaderIcon = lRows[1].LeaderIcon; end
-						if lRows[1].PlayerColor then info.PlayerColor = lRows[1].PlayerColor; else info.PlayerColor = cosmLeader; end
+						if lRows[1].PlayerColor then info.PlayerColor = lRows[1].PlayerColor; else info.PlayerColor = (slotPid ~= nil and ("LEADER_MAM_P" .. tostring(slotPid)) or cosmLeader); end
 					else
-						info.PlayerColor = cosmLeader;
+						info.PlayerColor = (slotPid ~= nil and ("LEADER_MAM_P" .. tostring(slotPid)) or cosmLeader);
 					end
 					if cRows and cRows[1] then
 						if cRows[1].CivilizationName then info.CivilizationName = cRows[1].CivilizationName; end
@@ -2224,7 +2241,7 @@ function DisplayCivLeaderToolTip(info:table, tooltipControls:table, alwaysHide:b
 			end
 		end
 
-		local isConstructor = (info and (info.LeaderType == "LEADER_MAM_BLANK" or info.LeaderType == "LEADER_MAM_RANDOM"));
+		local isConstructor = (info and MAM_IsMAMLeader(info.LeaderType));
 		if (alwaysHide or info == nil) then
 			if bForceHide or m_MAM_WindowClosed or g_MAM_Launching or (tooltipControls and not tooltipControls.HasLeaderPlacard and not isConstructor) then
 				if tooltipControls then
@@ -2240,14 +2257,18 @@ function DisplayCivLeaderToolTip(info:table, tooltipControls:table, alwaysHide:b
 			return;
 		end
 
-		if info and info.TargetPlayerId ~= nil and info.TargetPlayerId >= 0 then
+		local slotPid = info and MAM_SlotIndexFromLeader(info.LeaderType);
+		if slotPid ~= nil then
+			g_MAM_ConfiguringPlayerId = slotPid;
+			info.TargetPlayerId = slotPid;
+		elseif info and info.TargetPlayerId ~= nil and info.TargetPlayerId >= 0 then
 			g_MAM_ConfiguringPlayerId = info.TargetPlayerId;
 		elseif g_MAM_RowPid ~= nil and g_MAM_RowPid >= 0 then
 			g_MAM_ConfiguringPlayerId = g_MAM_RowPid;
 			if info then info.TargetPlayerId = g_MAM_RowPid; end
 		end
 
-		local targetPid = (info and info.TargetPlayerId ~= nil and info.TargetPlayerId >= 0) and info.TargetPlayerId or g_MAM_ConfiguringPlayerId or MAM_GetTargetPlayerId();
+		local targetPid = slotPid or ((info and info.TargetPlayerId ~= nil and info.TargetPlayerId >= 0) and info.TargetPlayerId) or g_MAM_ConfiguringPlayerId or MAM_GetTargetPlayerId();
 		if targetPid ~= nil and targetPid >= 0 then
 			g_MAM_ConfiguringPlayerId = targetPid;
 			if info then info.TargetPlayerId = targetPid; end
@@ -2393,7 +2414,7 @@ if ContextPtr and ContextPtr.SetUpdate then
 end
 
 function DisplayCivLeaderToolTip(info, tooltipControls, alwaysHide, bForceHide)
-	local isConstructor = (info and (info.LeaderType == "LEADER_MAM_BLANK" or info.LeaderType == "LEADER_MAM_RANDOM"));
+	local isConstructor = (info and MAM_IsMAMLeader(info.LeaderType));
 	if alwaysHide then
 		MAM_CancelPendingCard();
 		if bForceHide or m_MAM_WindowClosed or g_MAM_Launching or (tooltipControls and not tooltipControls.HasLeaderPlacard and not isConstructor) then
@@ -2422,11 +2443,11 @@ function DisplayCivLeaderToolTip(info, tooltipControls, alwaysHide, bForceHide)
 end
 
 function UpdateCivLeaderToolTip()
-	local tc = (m_MAM_BasicTooltipControls ~= nil and m_MAM_BasicTooltipControls.InfoStack ~= nil) and m_MAM_BasicTooltipControls or m_tooltipControls;
+	local tc = (m_MAM_BasicTooltipControls ~= nil and m_MAM_BasicTooltipControls.InfoStack ~= nil) and m_MAM_BasicTooltipControls or (m_MAM_AdvancedTooltipControls ~= nil and m_MAM_AdvancedTooltipControls.InfoStack ~= nil and m_MAM_AdvancedTooltipControls) or (m_MAM_LastTooltipControls ~= nil and m_MAM_LastTooltipControls.InfoStack ~= nil and m_MAM_LastTooltipControls) or nil;
 	if m_currentInfo and m_currentInfo.LeaderType ~= nil and tc ~= nil then
 		g_MAM_InTooltip = true;
 		pcall(function()
-			local isConstructor = (m_currentInfo.LeaderType == "LEADER_MAM_BLANK" or m_currentInfo.LeaderType == "LEADER_MAM_RANDOM");
+			local isConstructor = MAM_IsMAMLeader(m_currentInfo.LeaderType);
 			if isConstructor then
 				m_MAM_WindowClosed = false;
 				MAM_ShowCardNow(m_currentInfo, tc, false);
@@ -2446,14 +2467,15 @@ function SetMAMConstructorData(info:table, tooltipControls:table)
 	if info == nil then
 		info = m_MAM_LastInfo;
 	end
-	if tooltipControls == nil or info == nil then
+	if tooltipControls == nil or info == nil or tooltipControls.InfoStack == nil then
 		return false, false;
 	end
 
 	m_MAM_LastTooltipControls = tooltipControls;
 	m_MAM_LastInfo = info;
 
-	local targetPid = (info and info.TargetPlayerId ~= nil and info.TargetPlayerId >= 0) and info.TargetPlayerId or g_MAM_ConfiguringPlayerId or MAM_GetTargetPlayerId();
+	local slotPid = info and MAM_SlotIndexFromLeader(info.LeaderType);
+	local targetPid = slotPid or ((info and info.TargetPlayerId ~= nil and info.TargetPlayerId >= 0) and info.TargetPlayerId) or g_MAM_ConfiguringPlayerId or MAM_GetTargetPlayerId();
 	if g_MAM_ConfiguringPlayerId ~= targetPid then
 		m_MAM_View = "OVERVIEW";
 	end
@@ -2501,11 +2523,16 @@ function SetMAMConstructorData(info:table, tooltipControls:table)
 	end, false);
 
 	if m_MAM_View == "OVERVIEW" then
-		local titleInst = tooltipControls.HeaderIM:GetInstance();
-		titleInst.Header:SetText(Locale.ToUpper(Locale.Lookup("LOC_MAM_UI_TITLE")));
-
-		local hintInst = tooltipControls.HeaderIM:GetInstance();
-		hintInst.Header:SetText(Locale.Lookup("LOC_MAM_UI_HINT"));
+		if tooltipControls.HeaderIM then
+			local titleInst = tooltipControls.HeaderIM:GetInstance();
+			if titleInst and titleInst.Header then
+				titleInst.Header:SetText(Locale.ToUpper(Locale.Lookup("LOC_MAM_UI_TITLE")));
+			end
+			local hintInst = tooltipControls.HeaderIM:GetInstance();
+			if hintInst and hintInst.Header then
+				hintInst.Header:SetText(Locale.Lookup("LOC_MAM_UI_HINT"));
+			end
+		end
 
 		if canEdit then
 			MAM_AddButton(tooltipControls.InfoStack, Locale.Lookup("LOC_MAM_UI_REROLL_NOW"), function()
@@ -2554,34 +2581,36 @@ function SetMAMConstructorData(info:table, tooltipControls:table)
 
 		local curCiv = MAM_GetConfig("MAM_CIV_ABILITY", targetPid);
 		local civItem = MAM_FindDomainItem("MAM_CivAbilities", curCiv);
-		local civCard = tooltipControls.CivHeaderIconIM:GetInstance();
-		if isMystery then
-			civCard.Icon:SetIcon("ICON_CIVILIZATION_UNKNOWN");
-			civCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_CIV_HEADER") .. ": ❓ " .. Locale.Lookup("LOC_MAM_UI_MYSTERY_HIDDEN"));
-			civCard.Description:LocalizeAndSetText("LOC_MAM_UI_MYSTERY_DESC");
-		elseif curCiv == "RANDOM" then
-			civCard.Icon:SetIcon("ICON_CIVILIZATION_UNKNOWN");
-			civCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_CIV_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_RANDOM_NAME"));
-			civCard.Description:LocalizeAndSetText("LOC_MAM_RANDOM_DESC");
-		elseif curCiv == "NONE" then
-			civCard.Icon:SetIcon("ICON_CIVILIZATION_UNKNOWN");
-			civCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_CIV_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_NONE_NAME"));
-			civCard.Description:LocalizeAndSetText("LOC_MAM_NONE_DESC");
-		elseif civItem then
-			civCard.Icon:SetIcon(civItem.Icon);
-			civCard.Header:SetText(Locale.ToUpper(Locale.Lookup(civItem.Name)));
-			civCard.Description:LocalizeAndSetText(civItem.Description);
-			local colorRows = CachedQuery("SELECT LeaderType, PlayerColor FROM Players WHERE CivilizationType = ? LIMIT 1", curCiv);
-			local playerColorName = (colorRows and colorRows[1] and (colorRows[1].PlayerColor or colorRows[1].LeaderType)) or curCiv;
-			local backColor, frontColor = UI.GetPlayerColorValues(playerColorName, 0);
-			if backColor and frontColor and backColor ~= 0 and frontColor ~= 0 then
-				if civCard.IconBG then civCard.IconBG:SetColor(backColor); end
-				if civCard.Icon then civCard.Icon:SetColor(frontColor); end
+		local civCard = tooltipControls.CivHeaderIconIM and tooltipControls.CivHeaderIconIM:GetInstance();
+		if civCard then
+			if isMystery then
+				civCard.Icon:SetIcon("ICON_CIVILIZATION_UNKNOWN");
+				civCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_CIV_HEADER") .. ": ❓ " .. Locale.Lookup("LOC_MAM_UI_MYSTERY_HIDDEN"));
+				civCard.Description:LocalizeAndSetText("LOC_MAM_UI_MYSTERY_DESC");
+			elseif curCiv == "RANDOM" then
+				civCard.Icon:SetIcon("ICON_CIVILIZATION_UNKNOWN");
+				civCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_CIV_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_RANDOM_NAME"));
+				civCard.Description:LocalizeAndSetText("LOC_MAM_RANDOM_DESC");
+			elseif curCiv == "NONE" then
+				civCard.Icon:SetIcon("ICON_CIVILIZATION_UNKNOWN");
+				civCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_CIV_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_NONE_NAME"));
+				civCard.Description:LocalizeAndSetText("LOC_MAM_NONE_DESC");
+			elseif civItem then
+				civCard.Icon:SetIcon(civItem.Icon);
+				civCard.Header:SetText(Locale.ToUpper(Locale.Lookup(civItem.Name)));
+				civCard.Description:LocalizeAndSetText(civItem.Description);
+				local colorRows = CachedQuery("SELECT LeaderType, PlayerColor FROM Players WHERE CivilizationType = ? LIMIT 1", curCiv);
+				local playerColorName = (colorRows and colorRows[1] and (colorRows[1].PlayerColor or colorRows[1].LeaderType)) or curCiv;
+				local backColor, frontColor = UI.GetPlayerColorValues(playerColorName, 0);
+				if backColor and frontColor and backColor ~= 0 and frontColor ~= 0 then
+					if civCard.IconBG then civCard.IconBG:SetColor(backColor); end
+					if civCard.Icon then civCard.Icon:SetColor(frontColor); end
+				end
+			else
+				civCard.Icon:SetIcon("ICON_CIVILIZATION_UNKNOWN");
+				civCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_CIV_HEADER"));
+				civCard.Description:LocalizeAndSetText("LOC_MAM_UI_PROMPT_CIV");
 			end
-		else
-			civCard.Icon:SetIcon("ICON_CIVILIZATION_UNKNOWN");
-			civCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_CIV_HEADER"));
-			civCard.Description:LocalizeAndSetText("LOC_MAM_UI_PROMPT_CIV");
 		end
 		if canEdit then
 			MAM_AddButton(tooltipControls.InfoStack, Locale.Lookup((civItem or curCiv == "RANDOM" or isMystery) and "LOC_MAM_UI_CHANGE" or "LOC_MAM_UI_CHOOSE"), function()
@@ -2592,27 +2621,29 @@ function SetMAMConstructorData(info:table, tooltipControls:table)
 
 		local curLeader = MAM_GetConfig("MAM_LEADER_ABILITY", targetPid);
 		local leaderItem = MAM_FindDomainItem("MAM_LeaderAbilities", curLeader);
-		local leaderCard = tooltipControls.HeaderIconIM:GetInstance();
-		if isMystery then
-			leaderCard.Icon:SetIcon("ICON_LEADER_RANDOM_POOL_1");
-			leaderCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_LEADER_HEADER") .. ": ❓ " .. Locale.Lookup("LOC_MAM_UI_MYSTERY_HIDDEN"));
-			leaderCard.Description:LocalizeAndSetText("LOC_MAM_UI_MYSTERY_DESC");
-		elseif curLeader == "RANDOM" then
-			leaderCard.Icon:SetIcon("ICON_LEADER_RANDOM_POOL_1");
-			leaderCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_LEADER_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_RANDOM_NAME"));
-			leaderCard.Description:LocalizeAndSetText("LOC_MAM_RANDOM_DESC");
-		elseif curLeader == "NONE" then
-			leaderCard.Icon:SetIcon("ICON_LEADER_DEFAULT");
-			leaderCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_LEADER_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_NONE_NAME"));
-			leaderCard.Description:LocalizeAndSetText("LOC_MAM_NONE_DESC");
-		elseif leaderItem then
-			leaderCard.Icon:SetIcon(leaderItem.Icon);
-			leaderCard.Header:SetText(Locale.ToUpper(Locale.Lookup(leaderItem.Name)));
-			leaderCard.Description:LocalizeAndSetText(leaderItem.Description);
-		else
-			leaderCard.Icon:SetIcon("ICON_LEADER_DEFAULT");
-			leaderCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_LEADER_HEADER"));
-			leaderCard.Description:LocalizeAndSetText("LOC_MAM_UI_PROMPT_LEADER");
+		local leaderCard = tooltipControls.HeaderIconIM and tooltipControls.HeaderIconIM:GetInstance();
+		if leaderCard then
+			if isMystery then
+				leaderCard.Icon:SetIcon("ICON_LEADER_RANDOM_POOL_1");
+				leaderCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_LEADER_HEADER") .. ": ❓ " .. Locale.Lookup("LOC_MAM_UI_MYSTERY_HIDDEN"));
+				leaderCard.Description:LocalizeAndSetText("LOC_MAM_UI_MYSTERY_DESC");
+			elseif curLeader == "RANDOM" then
+				leaderCard.Icon:SetIcon("ICON_LEADER_RANDOM_POOL_1");
+				leaderCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_LEADER_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_RANDOM_NAME"));
+				leaderCard.Description:LocalizeAndSetText("LOC_MAM_RANDOM_DESC");
+			elseif curLeader == "NONE" then
+				leaderCard.Icon:SetIcon("ICON_LEADER_DEFAULT");
+				leaderCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_LEADER_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_NONE_NAME"));
+				leaderCard.Description:LocalizeAndSetText("LOC_MAM_NONE_DESC");
+			elseif leaderItem then
+				leaderCard.Icon:SetIcon(leaderItem.Icon);
+				leaderCard.Header:SetText(Locale.ToUpper(Locale.Lookup(leaderItem.Name)));
+				leaderCard.Description:LocalizeAndSetText(leaderItem.Description);
+			else
+				leaderCard.Icon:SetIcon("ICON_LEADER_DEFAULT");
+				leaderCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_LEADER_HEADER"));
+				leaderCard.Description:LocalizeAndSetText("LOC_MAM_UI_PROMPT_LEADER");
+			end
 		end
 		if canEdit then
 			MAM_AddButton(tooltipControls.InfoStack, Locale.Lookup((leaderItem or curLeader == "RANDOM" or isMystery) and "LOC_MAM_UI_CHANGE" or "LOC_MAM_UI_CHOOSE"), function()
@@ -2623,27 +2654,29 @@ function SetMAMConstructorData(info:table, tooltipControls:table)
 
 		local curUnit = MAM_GetConfig("MAM_UNIQUE_UNIT", targetPid);
 		local unitItem = MAM_FindDomainItem("MAM_UniqueUnits", curUnit);
-		local unitCard = tooltipControls.UniqueIconIM:GetInstance();
-		if isMystery then
-			unitCard.Icon:SetIcon("ICON_LEADER_RANDOM_POOL_2");
-			unitCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_UNIT_HEADER") .. ": ❓ " .. Locale.Lookup("LOC_MAM_UI_MYSTERY_HIDDEN"));
-			unitCard.Description:LocalizeAndSetText("LOC_MAM_UI_MYSTERY_DESC");
-		elseif curUnit == "RANDOM" then
-			unitCard.Icon:SetIcon("ICON_LEADER_RANDOM_POOL_2");
-			unitCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_UNIT_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_RANDOM_NAME"));
-			unitCard.Description:LocalizeAndSetText("LOC_MAM_RANDOM_DESC");
-		elseif curUnit == "NONE" then
-			unitCard.Icon:SetIcon("ICON_LEADER_DEFAULT");
-			unitCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_UNIT_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_NONE_NAME"));
-			unitCard.Description:LocalizeAndSetText("LOC_MAM_NONE_DESC");
-		elseif unitItem then
-			unitCard.Icon:SetIcon(unitItem.Icon);
-			unitCard.Header:SetText(Locale.ToUpper(Locale.Lookup(unitItem.Name)));
-			unitCard.Description:LocalizeAndSetText(unitItem.Description);
-		else
-			unitCard.Icon:SetIcon("ICON_LEADER_DEFAULT");
-			unitCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_UNIT_HEADER"));
-			unitCard.Description:LocalizeAndSetText("LOC_MAM_UI_PROMPT_UNIT");
+		local unitCard = tooltipControls.UniqueIconIM and tooltipControls.UniqueIconIM:GetInstance();
+		if unitCard then
+			if isMystery then
+				unitCard.Icon:SetIcon("ICON_LEADER_RANDOM_POOL_2");
+				unitCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_UNIT_HEADER") .. ": ❓ " .. Locale.Lookup("LOC_MAM_UI_MYSTERY_HIDDEN"));
+				unitCard.Description:LocalizeAndSetText("LOC_MAM_UI_MYSTERY_DESC");
+			elseif curUnit == "RANDOM" then
+				unitCard.Icon:SetIcon("ICON_LEADER_RANDOM_POOL_2");
+				unitCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_UNIT_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_RANDOM_NAME"));
+				unitCard.Description:LocalizeAndSetText("LOC_MAM_RANDOM_DESC");
+			elseif curUnit == "NONE" then
+				unitCard.Icon:SetIcon("ICON_LEADER_DEFAULT");
+				unitCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_UNIT_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_NONE_NAME"));
+				unitCard.Description:LocalizeAndSetText("LOC_MAM_NONE_DESC");
+			elseif unitItem then
+				unitCard.Icon:SetIcon(unitItem.Icon);
+				unitCard.Header:SetText(Locale.ToUpper(Locale.Lookup(unitItem.Name)));
+				unitCard.Description:LocalizeAndSetText(unitItem.Description);
+			else
+				unitCard.Icon:SetIcon("ICON_LEADER_DEFAULT");
+				unitCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_UNIT_HEADER"));
+				unitCard.Description:LocalizeAndSetText("LOC_MAM_UI_PROMPT_UNIT");
+			end
 		end
 		if canEdit then
 			MAM_AddButton(tooltipControls.InfoStack, Locale.Lookup((unitItem or curUnit == "RANDOM" or isMystery) and "LOC_MAM_UI_CHANGE" or "LOC_MAM_UI_CHOOSE"), function()
@@ -2654,27 +2687,29 @@ function SetMAMConstructorData(info:table, tooltipControls:table)
 
 		local curDistrict = MAM_GetConfig("MAM_UNIQUE_DISTRICT", targetPid);
 		local distItem = MAM_FindDomainItem("MAM_UniqueDistricts", curDistrict);
-		local distCard = tooltipControls.UniqueIconIM:GetInstance();
-		if isMystery then
-			distCard.Icon:SetIcon("ICON_LEADER_RANDOM_POOL_2");
+		local distCard = tooltipControls.UniqueIconIM and tooltipControls.UniqueIconIM:GetInstance();
+		if distCard then
+			if isMystery then
+				distCard.Icon:SetIcon("ICON_LEADER_RANDOM_POOL_2");
 			distCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_DISTRICT_HEADER") .. ": ❓ " .. Locale.Lookup("LOC_MAM_UI_MYSTERY_HIDDEN"));
 			distCard.Description:LocalizeAndSetText("LOC_MAM_UI_MYSTERY_DESC");
-		elseif curDistrict == "RANDOM" then
-			distCard.Icon:SetIcon("ICON_LEADER_RANDOM_POOL_2");
-			distCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_DISTRICT_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_RANDOM_NAME"));
-			distCard.Description:LocalizeAndSetText("LOC_MAM_RANDOM_DESC");
-		elseif curDistrict == "NONE" then
-			distCard.Icon:SetIcon("ICON_LEADER_DEFAULT");
-			distCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_DISTRICT_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_NONE_NAME"));
-			distCard.Description:LocalizeAndSetText("LOC_MAM_NONE_DESC");
-		elseif distItem then
-			distCard.Icon:SetIcon(distItem.Icon);
-			distCard.Header:SetText(Locale.ToUpper(Locale.Lookup(distItem.Name)));
-			distCard.Description:LocalizeAndSetText(distItem.Description);
-		else
-			distCard.Icon:SetIcon("ICON_LEADER_DEFAULT");
-			distCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_DISTRICT_HEADER"));
-			distCard.Description:LocalizeAndSetText("LOC_MAM_UI_PROMPT_DISTRICT");
+			elseif curDistrict == "RANDOM" then
+				distCard.Icon:SetIcon("ICON_LEADER_RANDOM_POOL_2");
+				distCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_DISTRICT_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_RANDOM_NAME"));
+				distCard.Description:LocalizeAndSetText("LOC_MAM_RANDOM_DESC");
+			elseif curDistrict == "NONE" then
+				distCard.Icon:SetIcon("ICON_LEADER_DEFAULT");
+				distCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_DISTRICT_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_NONE_NAME"));
+				distCard.Description:LocalizeAndSetText("LOC_MAM_NONE_DESC");
+			elseif distItem then
+				distCard.Icon:SetIcon(distItem.Icon);
+				distCard.Header:SetText(Locale.ToUpper(Locale.Lookup(distItem.Name)));
+				distCard.Description:LocalizeAndSetText(distItem.Description);
+			else
+				distCard.Icon:SetIcon("ICON_LEADER_DEFAULT");
+				distCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_DISTRICT_HEADER"));
+				distCard.Description:LocalizeAndSetText("LOC_MAM_UI_PROMPT_DISTRICT");
+			end
 		end
 		if canEdit then
 			MAM_AddButton(tooltipControls.InfoStack, Locale.Lookup((distItem or curDistrict == "RANDOM" or isMystery) and "LOC_MAM_UI_CHANGE" or "LOC_MAM_UI_CHOOSE"), function()
@@ -2683,32 +2718,38 @@ function SetMAMConstructorData(info:table, tooltipControls:table)
 			end, false);
 		end
 
-		local cosHeaderInst = tooltipControls.HeaderIM:GetInstance();
-		cosHeaderInst.Header:SetText(Locale.ToUpper(Locale.Lookup("LOC_MAM_UI_COSMETIC_SECTION")));
+		if tooltipControls.HeaderIM then
+			local cosHeaderInst = tooltipControls.HeaderIM:GetInstance();
+			if cosHeaderInst and cosHeaderInst.Header then
+				cosHeaderInst.Header:SetText(Locale.ToUpper(Locale.Lookup("LOC_MAM_UI_COSMETIC_SECTION")));
+			end
+		end
 
 		local cosmCivItem = MAM_FindDomainItem("MAM_CivAbilities", cosmCiv);
-		local cosmCivCard = tooltipControls.CivHeaderIconIM:GetInstance();
-		if isMystery and MAM_GetConfig("MAM_HAS_CUSTOM_COSM_CIV", targetPid) ~= "TRUE" then
-			cosmCivCard.Icon:SetIcon("ICON_CIVILIZATION_UNKNOWN");
-			cosmCivCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_COSMETIC_CIV_HEADER") .. ": ❓ " .. Locale.Lookup("LOC_MAM_UI_MYSTERY_HIDDEN"));
-			cosmCivCard.Description:LocalizeAndSetText("LOC_MAM_UI_MYSTERY_DESC");
-		elseif cosmCivItem then
-			cosmCivCard.Icon:SetIcon(cosmCivItem.Icon);
-			cosmCivCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_COSMETIC_CIV_HEADER") .. ": " .. Locale.Lookup(cosmCivItem.Name));
-			cosmCivCard.Description:LocalizeAndSetText("LOC_MAM_UI_COSMETIC_CIV_DESC");
-			local colorRows = CachedQuery("SELECT LeaderType, PlayerColor FROM Players WHERE CivilizationType = ? LIMIT 1", cosmCiv);
-			local playerColorName = (colorRows and colorRows[1] and (colorRows[1].PlayerColor or colorRows[1].LeaderType)) or cosmCiv;
-			local backColor, frontColor = UI.GetPlayerColorValues(playerColorName, 0);
-			if backColor and frontColor and backColor ~= 0 and frontColor ~= 0 then
-				if cosmCivCard.IconBG then cosmCivCard.IconBG:SetColor(backColor); end
-				if cosmCivCard.Icon then cosmCivCard.Icon:SetColor(frontColor); end
+		local cosmCivCard = tooltipControls.CivHeaderIconIM and tooltipControls.CivHeaderIconIM:GetInstance();
+		if cosmCivCard then
+			if isMystery and MAM_GetConfig("MAM_HAS_CUSTOM_COSM_CIV", targetPid) ~= "TRUE" then
+				cosmCivCard.Icon:SetIcon("ICON_CIVILIZATION_UNKNOWN");
+				cosmCivCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_COSMETIC_CIV_HEADER") .. ": ❓ " .. Locale.Lookup("LOC_MAM_UI_MYSTERY_HIDDEN"));
+				cosmCivCard.Description:LocalizeAndSetText("LOC_MAM_UI_MYSTERY_DESC");
+			elseif cosmCivItem then
+				cosmCivCard.Icon:SetIcon(cosmCivItem.Icon);
+				cosmCivCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_COSMETIC_CIV_HEADER") .. ": " .. Locale.Lookup(cosmCivItem.Name));
+				cosmCivCard.Description:LocalizeAndSetText("LOC_MAM_UI_COSMETIC_CIV_DESC");
+				local colorRows = CachedQuery("SELECT LeaderType, PlayerColor FROM Players WHERE CivilizationType = ? LIMIT 1", cosmCiv);
+				local playerColorName = (colorRows and colorRows[1] and (colorRows[1].PlayerColor or colorRows[1].LeaderType)) or cosmCiv;
+				local backColor, frontColor = UI.GetPlayerColorValues(playerColorName, 0);
+				if backColor and frontColor and backColor ~= 0 and frontColor ~= 0 then
+					if cosmCivCard.IconBG then cosmCivCard.IconBG:SetColor(backColor); end
+					if cosmCivCard.Icon then cosmCivCard.Icon:SetColor(frontColor); end
+				end
+			else
+				cosmCivCard.Icon:SetIcon("ICON_CIVILIZATION_UNKNOWN");
+				cosmCivCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_COSMETIC_CIV_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_NONE_NAME"));
+				cosmCivCard.Description:LocalizeAndSetText("LOC_MAM_UI_COSMETIC_CIV_DESC");
+				if cosmCivCard.IconBG then cosmCivCard.IconBG:SetColor(0xFFFFFFFF); end
+				if cosmCivCard.Icon then cosmCivCard.Icon:SetColor(0xFFFFFFFF); end
 			end
-		else
-			cosmCivCard.Icon:SetIcon("ICON_CIVILIZATION_UNKNOWN");
-			cosmCivCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_COSMETIC_CIV_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_NONE_NAME"));
-			cosmCivCard.Description:LocalizeAndSetText("LOC_MAM_UI_COSMETIC_CIV_DESC");
-			if cosmCivCard.IconBG then cosmCivCard.IconBG:SetColor(0xFFFFFFFF); end
-			if cosmCivCard.Icon then cosmCivCard.Icon:SetColor(0xFFFFFFFF); end
 		end
 		if canEdit then
 			MAM_AddButton(tooltipControls.InfoStack, Locale.Lookup("LOC_MAM_UI_CHANGE_COSMETIC_CIV"), function()
@@ -2718,19 +2759,21 @@ function SetMAMConstructorData(info:table, tooltipControls:table)
 		end
 
 		local cosmLeaderItem = MAM_FindDomainItem("MAM_LeaderAbilities", cosmLeader);
-		local cosmLeaderCard = tooltipControls.HeaderIconIM:GetInstance();
-		if isMystery and MAM_GetConfig("MAM_HAS_CUSTOM_COSM_LEADER", targetPid) ~= "TRUE" then
-			cosmLeaderCard.Icon:SetIcon("ICON_LEADER_DEFAULT");
-			cosmLeaderCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_COSMETIC_LEADER_HEADER") .. ": ❓ " .. Locale.Lookup("LOC_MAM_UI_MYSTERY_HIDDEN"));
-			cosmLeaderCard.Description:LocalizeAndSetText("LOC_MAM_UI_MYSTERY_DESC");
-		elseif cosmLeaderItem then
-			cosmLeaderCard.Icon:SetIcon(cosmLeaderItem.Icon);
-			cosmLeaderCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_COSMETIC_LEADER_HEADER") .. ": " .. Locale.Lookup(cosmLeaderItem.Name));
-			cosmLeaderCard.Description:LocalizeAndSetText("LOC_MAM_UI_COSMETIC_LEADER_DESC");
-		else
-			cosmLeaderCard.Icon:SetIcon("ICON_LEADER_DEFAULT");
-			cosmLeaderCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_COSMETIC_LEADER_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_NONE_NAME"));
-			cosmLeaderCard.Description:LocalizeAndSetText("LOC_MAM_UI_COSMETIC_LEADER_DESC");
+		local cosmLeaderCard = tooltipControls.HeaderIconIM and tooltipControls.HeaderIconIM:GetInstance();
+		if cosmLeaderCard then
+			if isMystery and MAM_GetConfig("MAM_HAS_CUSTOM_COSM_LEADER", targetPid) ~= "TRUE" then
+				cosmLeaderCard.Icon:SetIcon("ICON_LEADER_DEFAULT");
+				cosmLeaderCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_COSMETIC_LEADER_HEADER") .. ": ❓ " .. Locale.Lookup("LOC_MAM_UI_MYSTERY_HIDDEN"));
+				cosmLeaderCard.Description:LocalizeAndSetText("LOC_MAM_UI_MYSTERY_DESC");
+			elseif cosmLeaderItem then
+				cosmLeaderCard.Icon:SetIcon(cosmLeaderItem.Icon);
+				cosmLeaderCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_COSMETIC_LEADER_HEADER") .. ": " .. Locale.Lookup(cosmLeaderItem.Name));
+				cosmLeaderCard.Description:LocalizeAndSetText("LOC_MAM_UI_COSMETIC_LEADER_DESC");
+			else
+				cosmLeaderCard.Icon:SetIcon("ICON_LEADER_DEFAULT");
+				cosmLeaderCard.Header:SetText(Locale.Lookup("LOC_MAM_UI_COSMETIC_LEADER_HEADER") .. ": " .. Locale.Lookup("LOC_MAM_NONE_NAME"));
+				cosmLeaderCard.Description:LocalizeAndSetText("LOC_MAM_UI_COSMETIC_LEADER_DESC");
+			end
 		end
 		if canEdit then
 			MAM_AddButton(tooltipControls.InfoStack, Locale.Lookup("LOC_MAM_UI_CHANGE_COSMETIC_LEADER"), function()
@@ -2794,16 +2837,22 @@ function SetMAMConstructorData(info:table, tooltipControls:table)
 			g_MAM_ConfiguringPlayerId = targetPid; SetMAMConstructorData(info, tooltipControls);
 		end, false);
 
-		local catInst = tooltipControls.HeaderIM:GetInstance();
-		catInst.Header:SetText(Locale.ToUpper(Locale.Lookup(headerTag)));
+		if tooltipControls.HeaderIM then
+			local catInst = tooltipControls.HeaderIM:GetInstance();
+			if catInst and catInst.Header then
+				catInst.Header:SetText(Locale.ToUpper(Locale.Lookup(headerTag)));
+			end
+		end
 
 		local curVal = MAM_GetConfig(configKey, targetPid);
 
-		if not isCosmetic then
+		if not isCosmetic and imType then
 			local noneCard = imType:GetInstance();
-			noneCard.Icon:SetIcon(defaultIcon);
-			noneCard.Header:SetText(Locale.Lookup("LOC_MAM_NONE_NAME"));
-			noneCard.Description:LocalizeAndSetText("LOC_MAM_NONE_DESC");
+			if noneCard then
+				noneCard.Icon:SetIcon(defaultIcon);
+				noneCard.Header:SetText(Locale.Lookup("LOC_MAM_NONE_NAME"));
+				noneCard.Description:LocalizeAndSetText("LOC_MAM_NONE_DESC");
+			end
 			local isNoneSel = (curVal == "NONE");
 			MAM_AddButton(tooltipControls.InfoStack, Locale.Lookup(isNoneSel and "LOC_MAM_UI_SELECTED" or "LOC_MAM_UI_CHOOSE"), function()
 				MAM_SetConfig(configKey, "NONE", targetPid);
@@ -2818,10 +2867,14 @@ function SetMAMConstructorData(info:table, tooltipControls:table)
 			end, isNoneSel);
 		end
 
-		local randomCard = imType:GetInstance();
-		randomCard.Icon:SetIcon(domainName == "MAM_CivAbilities" and "ICON_CIVILIZATION_UNKNOWN" or "ICON_LEADER_RANDOM_POOL_1");
-		randomCard.Header:SetText(Locale.Lookup("LOC_MAM_RANDOM_NAME"));
-		randomCard.Description:LocalizeAndSetText("LOC_MAM_RANDOM_DESC");
+		if imType then
+			local randomCard = imType:GetInstance();
+			if randomCard then
+				randomCard.Icon:SetIcon(domainName == "MAM_CivAbilities" and "ICON_CIVILIZATION_UNKNOWN" or "ICON_LEADER_RANDOM_POOL_1");
+				randomCard.Header:SetText(Locale.Lookup("LOC_MAM_RANDOM_NAME"));
+				randomCard.Description:LocalizeAndSetText("LOC_MAM_RANDOM_DESC");
+			end
+		end
 		MAM_AddButton(tooltipControls.InfoStack, Locale.Lookup("LOC_MAM_UI_CHOOSE"), function()
 			local usedCivs, usedLeaders, usedUnits, usedDistricts = MAM_GetUsedCivsAndLeaders(targetPid);
 			local exMap = usedCivs;
@@ -2888,36 +2941,37 @@ function SetMAMConstructorData(info:table, tooltipControls:table)
 				table.insert(pageItems, items[idx]);
 			end
 			for _, item in ipairs(pageItems) do
-				local itemCard = imType:GetInstance();
-				itemCard.Icon:SetIcon(item.Icon);
+				local itemCard = imType and imType:GetInstance();
+				if itemCard then
+					itemCard.Icon:SetIcon(item.Icon);
 
-				if isCosmetic then
-					if m_MAM_View == "CIV_COSMETIC_SELECT" then
-						local civRow = CachedQuery("SELECT CivilizationName FROM Players WHERE CivilizationType = ? LIMIT 1", item.Value);
-						local civNameTag = (civRow and civRow[1] and civRow[1].CivilizationName) or item.Name;
-						itemCard.Header:SetText(Locale.Lookup(civNameTag));
-						itemCard.Description:LocalizeAndSetText("LOC_MAM_UI_COSMETIC_CIV_DESC");
-					elseif m_MAM_View == "LEADER_COSMETIC_SELECT" then
-						local leadRow = CachedQuery("SELECT LeaderName FROM Players WHERE LeaderType = ? LIMIT 1", item.Value);
-						local leadNameTag = (leadRow and leadRow[1] and leadRow[1].LeaderName) or item.Name;
-						itemCard.Header:SetText(Locale.Lookup(leadNameTag));
-						itemCard.Description:LocalizeAndSetText("LOC_MAM_UI_COSMETIC_LEADER_DESC");
+					if isCosmetic then
+						if m_MAM_View == "CIV_COSMETIC_SELECT" then
+							local civRow = CachedQuery("SELECT CivilizationName FROM Players WHERE CivilizationType = ? LIMIT 1", item.Value);
+							local civNameTag = (civRow and civRow[1] and civRow[1].CivilizationName) or item.Name;
+							itemCard.Header:SetText(Locale.Lookup(civNameTag));
+							itemCard.Description:LocalizeAndSetText("LOC_MAM_UI_COSMETIC_CIV_DESC");
+						elseif m_MAM_View == "LEADER_COSMETIC_SELECT" then
+							local leadRow = CachedQuery("SELECT LeaderName FROM Players WHERE LeaderType = ? LIMIT 1", item.Value);
+							local leadNameTag = (leadRow and leadRow[1] and leadRow[1].LeaderName) or item.Name;
+							itemCard.Header:SetText(Locale.Lookup(leadNameTag));
+							itemCard.Description:LocalizeAndSetText("LOC_MAM_UI_COSMETIC_LEADER_DESC");
+						end
+					else
+						itemCard.Header:SetText(Locale.Lookup(item.Name));
+						itemCard.Description:LocalizeAndSetText(item.Description);
 					end
-				else
-					itemCard.Header:SetText(Locale.Lookup(item.Name));
-					itemCard.Description:LocalizeAndSetText(item.Description);
-				end
 
 				if domainName == "MAM_CivAbilities" then
 					local leadForCivRow = CachedQuery("SELECT LeaderType, PlayerColor FROM Players WHERE CivilizationType = ? LIMIT 1", item.Value);
 					local playerColorName = (leadForCivRow and leadForCivRow[1] and (leadForCivRow[1].PlayerColor or leadForCivRow[1].LeaderType)) or item.Value;
 					local backColor, frontColor = UI.GetPlayerColorValues(playerColorName, 0);
-					if backColor and frontColor and backColor ~= 0 and frontColor ~= 0 then
+				if backColor and frontColor and backColor ~= 0 and frontColor ~= 0 then
 						if itemCard.IconBG then itemCard.IconBG:SetColor(backColor); end
 						if itemCard.Icon then itemCard.Icon:SetColor(frontColor); end
 					end
 				end
-
+			end
 				local isItemSel = (item.Value == curVal);
 				local thisVal = item.Value;
 				MAM_AddButton(tooltipControls.InfoStack, Locale.Lookup(isItemSel and "LOC_MAM_UI_SELECTED" or "LOC_MAM_UI_CHOOSE"), function()
@@ -2967,7 +3021,7 @@ end
 
 function SetUniqueCivLeaderData(info:table, tooltipControls:table)
 
-	if (info and (info.LeaderType == "LEADER_MAM_BLANK" or info.LeaderType == "LEADER_MAM_RANDOM")) then
+	if (info and MAM_IsMAMLeader(info.LeaderType)) then
 		return SetMAMConstructorData(info, tooltipControls);
 	end
 
@@ -3330,22 +3384,25 @@ function SetupLeaderPulldown(
 
 			if(	ValuesMatch(leaderParameter.Value, cache.PlayerValue) and
 				ValuesMatch(colorIndex, cache.PlayerColorValue) and
-				(leaderParameter.Value == nil or (leaderParameter.Value.Value ~= "LEADER_MAM_BLANK" and leaderParameter.Value.Value ~= "LEADER_MAM_RANDOM") or (cache.MAMCosmCiv == MAM_GetCosmeticCiv(playerId) and cache.MAMCosmLeader == MAM_GetCosmeticLeader(playerId)))) then
+				(leaderParameter.Value == nil or not MAM_IsMAMLeader(leaderParameter.Value) or (cache.MAMCosmCiv == MAM_GetCosmeticCiv(playerId) and cache.MAMCosmLeader == MAM_GetCosmeticLeader(playerId)))) then
 				refresh = false;
 			end
 
-			if(playerId == 0) then
-				local info = GetPlayerInfo(v.Domain, v.Value, playerId);
-				info.PlayerColorIndex = colorIndex;
-				m_currentInfo = info;
-				local isConstructorVal = (v and (v.Value == "LEADER_MAM_BLANK" or v.Value == "LEADER_MAM_RANDOM"));
-				if tooltipControls.HasLeaderPlacard then
-					if isConstructorVal then
-						if not m_MAM_WindowClosed then
+			if(playerId == MAM_GetLocalPlayerId() or playerId == 0) then
+				local info = GetPlayerInfo(v.Domain, (type(v)=="table" and v.Value or v), playerId);
+				if info then
+					info.PlayerColorIndex = colorIndex;
+					info.TargetPlayerId = playerId;
+					m_currentInfo = info;
+					local isConstructorVal = (v and MAM_IsMAMLeader(v));
+					if tooltipControls and tooltipControls.HasLeaderPlacard then
+						if isConstructorVal then
+							if not m_MAM_WindowClosed then
+								MAM_ShowCardNow(info, tooltipControls, false);
+							end
+						else
 							MAM_ShowCardNow(info, tooltipControls, false);
-						end
-					else
-						MAM_ShowCardNow(info, tooltipControls, false);
+					end
 					end
 				end
 			end
@@ -3359,13 +3416,13 @@ function SetupLeaderPulldown(
 					button:ClearCallback(Mouse.eMouseExit);
 				else
 					local caption = v.Name;
-					if (v.Value == "LEADER_MAM_BLANK" or v.Value == "LEADER_MAM_RANDOM") then
+					if MAM_IsMAMLeader(v) then
 						local cosmCiv = MAM_GetCosmeticCiv(playerId);
 						local cosmLeader = MAM_GetCosmeticLeader(playerId);
 						local pConfig = PlayerConfigurations[playerId];
 						local civAbil = pConfig and pConfig:GetValue("MAM_CIV_ABILITY");
 						local leadAbil = pConfig and pConfig:GetValue("MAM_LEADER_ABILITY");
-						local leaderBaseName = Locale.Lookup(v.Value == "LEADER_MAM_RANDOM" and "LOC_MAM_LEADER_RANDOM_NAME" or "LOC_MAM_LEADER_NAME");
+						local leaderBaseName = Locale.Lookup((type(v)=="table" and v.Value or v) == "LEADER_MAM_RANDOM" and "LOC_MAM_LEADER_RANDOM_NAME" or "LOC_MAM_LEADER_NAME");
 						if civAbil == "RANDOM" or leadAbil == "RANDOM" then
 							caption = leaderBaseName .. ": " .. Locale.Lookup("LOC_MAM_RANDOM_NAME");
 						elseif (civAbil == "NONE" or civAbil == nil or civAbil == "") and (leadAbil == "NONE" or leadAbil == nil or leadAbil == "") then
@@ -3412,25 +3469,27 @@ function SetupLeaderPulldown(
 
 					local domain = v.Domain;
 					local value = v.Value;
-					local isConstructorVal = (value == "LEADER_MAM_BLANK" or value == "LEADER_MAM_RANDOM");
+					local isConstructorVal = MAM_IsMAMLeader(value);
 
 					if(not tooltipControls.HasLeaderPlacard) then
 						button:RegisterCallback( Mouse.eMouseEnter, function()
 							local curVal = cache.PlayerValue or v;
 							local curColor = cache.PlayerColorValue or colorIndex;
 							local info = GetPlayerInfo(curVal.Domain, curVal.Value, playerId);
-							info.PlayerColorIndex = curColor;
-							info.TargetPlayerId = playerId;
-							if curVal.Value == "LEADER_MAM_BLANK" or curVal.Value == "LEADER_MAM_RANDOM" then
-								m_currentInfo = info;
-								g_MAM_ConfiguringPlayerId = playerId;
+							if info then
+								info.PlayerColorIndex = curColor;
+								info.TargetPlayerId = playerId;
+								if MAM_IsMAMLeader(curVal) then
+									m_currentInfo = info;
+									g_MAM_ConfiguringPlayerId = playerId;
+								end
+								DisplayCivLeaderToolTip(info, tooltipControls, false);
 							end
-							DisplayCivLeaderToolTip(info, tooltipControls, false);
 						end);
 
 						button:RegisterCallback( Mouse.eMouseExit, function()
 							MAM_CancelPendingCard();
-							if m_MAM_WindowClosed or (cache.PlayerValue and cache.PlayerValue.Value ~= "LEADER_MAM_BLANK" and cache.PlayerValue.Value ~= "LEADER_MAM_RANDOM") then
+							if m_MAM_WindowClosed or (cache.PlayerValue and not MAM_IsMAMLeader(cache.PlayerValue)) then
 								MAM_ShowCardNow(nil, tooltipControls, true, true);
 							end
 						end);
@@ -3466,11 +3525,11 @@ function SetupLeaderPulldown(
 					if hasPlacard then
 						MAM_ShowCardNow(m_currentInfo, tooltipControls, false);
 					else
-						if m_MAM_WindowClosed or (m_currentInfo and m_currentInfo.LeaderType ~= "LEADER_MAM_BLANK" and m_currentInfo.LeaderType ~= "LEADER_MAM_RANDOM") then
+						if m_MAM_WindowClosed or (m_currentInfo and not MAM_IsMAMLeader(m_currentInfo.LeaderType)) then
 							MAM_ShowCardNow(nil, tooltipControls, true, true);
-						end
 					end
-				end;
+				end
+			end;
 
 				for i,v in ipairs(values) do
 					if v ~= nil then
@@ -3478,13 +3537,13 @@ function SetupLeaderPulldown(
 
 						local entry = instanceManager:GetInstance();
 						local caption = v.Name;
-						if(v.Value == "LEADER_MAM_BLANK" or v.Value == "LEADER_MAM_RANDOM") then
-							if (v.Invalid and (v.InvalidReason == "LOC_SETUP_ERROR_NO_DUPLICATE_LEADERS" or v.InvalidReason == "LOC_SETUP_ERROR_NO_DUPLICATE_CIVILIZATIONS")) then
-								v.Invalid = false;
-								v.InvalidReason = nil;
-							end
-							entry.Button:SetDisabled(false);
+					if MAM_IsMAMLeader(v) then
+						if (v.Invalid and (v.InvalidReason == "LOC_SETUP_ERROR_NO_DUPLICATE_LEADERS" or v.InvalidReason == "LOC_SETUP_ERROR_NO_DUPLICATE_CIVILIZATIONS")) then
+							v.Invalid = false;
+							v.InvalidReason = nil;
 						end
+						entry.Button:SetDisabled(false);
+				end
 						if(v.Invalid) then
 							local err = v.InvalidReason or "LOC_SETUP_ERROR_INVALID_OPTION";
 							caption = caption .. "[NEWLINE][COLOR_RED](" .. Locale.Lookup(err) .. ")[ENDCOLOR]";
@@ -3526,23 +3585,33 @@ function SetupLeaderPulldown(
 							local parameter = parameters.Parameters["PlayerLeader"];
 							parameters:SetParameterValue(parameter, v);
 
-							if (v and (v.Value == "LEADER_MAM_BLANK" or v.Value == "LEADER_MAM_RANDOM")) then
+							if (v and MAM_IsMAMLeader(v)) then
 								g_MAM_ConfiguringPlayerId = playerId;
 								m_MAM_WindowClosed = false;
-								local pInfo = GetPlayerInfo(v.Domain, v.Value, playerId);
-								m_currentInfo = pInfo;
-								MAM_ShowCardNow(pInfo, tooltipControls, false);
+								if MAM_ApplySlotTypes then
+									local baseL = MAM_IsSlotLeader(v) and "LEADER_MAM_BLANK" or (type(v)=="table" and v.Value or v);
+									MAM_ApplySlotTypes(playerId, baseL);
+									if Network and Network.BroadcastPlayerInfo then
+										pcall(Network.BroadcastPlayerInfo, playerId);
+									end
+								end
+								local pInfo = GetPlayerInfo(v.Domain, (type(v)=="table" and v.Value or v), playerId);
+								if pInfo then
+									pInfo.TargetPlayerId = playerId;
+									m_currentInfo = pInfo;
+									MAM_ShowCardNow(pInfo, tooltipControls, false);
+								end
 							else
 								m_MAM_WindowClosed = true;
 								g_MAM_ConfiguringPlayerId = nil;
 								if playerId == 0 and v then
-									local pInfo = GetPlayerInfo(v.Domain, v.Value, playerId);
+									local pInfo = GetPlayerInfo(v.Domain, (type(v)=="table" and v.Value or v), playerId);
 									m_currentInfo = pInfo;
-									if tooltipControls.HasLeaderPlacard then
-										MAM_ShowCardNow(pInfo, tooltipControls, false);
-									else
-										MAM_ShowCardNow(nil, tooltipControls, true, true);
-									end
+								if tooltipControls and tooltipControls.HasLeaderPlacard then
+									MAM_ShowCardNow(pInfo, tooltipControls, false);
+								else
+									MAM_ShowCardNow(nil, tooltipControls, true, true);
+								end
 								else
 									MAM_ShowCardNow(nil, tooltipControls, true, true);
 								end
