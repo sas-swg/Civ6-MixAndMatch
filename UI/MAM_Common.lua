@@ -121,6 +121,8 @@ function MAM_ResolveOfficialCiv(civType)
 	elseif civType == "CIVILIZATION_MIXMATCH_DENMARK" then return "CIVILIZATION_NORWAY";
 	elseif civType == "CIVILIZATION_MIXMATCH_QUEENSLAND" or civType == "CIVILIZATION_MIXMATCH_WESTERN_AUSTRALIA" then return "CIVILIZATION_AUSTRALIA";
 	elseif civType == "CIVILIZATION_PERSIA" then return "CIVILIZATION_PERSIA";
+	elseif MAM_IsConstructorCiv(civType) or civType == nil or civType == "" then
+		return "CIVILIZATION_ROME";
 	end
 	return civType;
 end
@@ -132,6 +134,8 @@ function MAM_ResolveOfficialLeader(leaderType)
 	elseif leaderType == "LEADER_MIXMATCH_CNUT" or leaderType == "LEADER_MIXMATCH_OLOF" or leaderType == "LEADER_MIXMATCH_HARDRADA_SCENARIO" then return "LEADER_HARDRADA";
 	elseif leaderType == "LEADER_MIXMATCH_QUEENSLAND" or leaderType == "LEADER_MIXMATCH_WESTERN_AUSTRALIA" then return "LEADER_JOHN_CURTIN";
 	elseif leaderType == "LEADER_MIXMATCH_DARIUS_III" then return "LEADER_CYRUS";
+	elseif MAM_IsConstructorLeader(leaderType) or leaderType == "LEADER_DEFAULT" or leaderType == nil or leaderType == "" then
+		return "LEADER_TRAJAN";
 	end
 	return leaderType;
 end

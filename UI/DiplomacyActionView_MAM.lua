@@ -86,19 +86,20 @@ function ShowLeader(player : table)
 			local leaderName = pConfig:GetLeaderTypeName();
 			if MAM_IsConstructorLeader(leaderName) then
 				local cosmLeader = MAM_ResolveCosmeticLeader(pID);
-				ms_SelectedPlayerLeaderTypeName = cosmLeader;
-				SetFunctionUpvalue(BASE_MAM_ShowLeader, "ms_SelectedPlayerLeaderTypeName", cosmLeader);
-				SetFunctionUpvalue(UpdateSelectedPlayer, "ms_SelectedPlayerLeaderTypeName", cosmLeader);
+				local official3D = MAM_ResolveOfficialLeader(cosmLeader);
+				ms_SelectedPlayerLeaderTypeName = official3D;
+				SetFunctionUpvalue(BASE_MAM_ShowLeader, "ms_SelectedPlayerLeaderTypeName", official3D);
+				SetFunctionUpvalue(UpdateSelectedPlayer, "ms_SelectedPlayerLeaderTypeName", official3D);
 
 				local curShowing = GetFunctionUpvalue(BASE_MAM_ShowLeader, "ms_showingLeaderName") or m_MAM_showingLeaderName;
-				if (cosmLeader ~= curShowing) then
-					m_MAM_showingLeaderName = cosmLeader;
-					ms_showingLeaderName = cosmLeader;
-					SetFunctionUpvalue(BASE_MAM_ShowLeader, "ms_showingLeaderName", cosmLeader);
+				if (official3D ~= curShowing) then
+					m_MAM_showingLeaderName = official3D;
+					ms_showingLeaderName = official3D;
+					SetFunctionUpvalue(BASE_MAM_ShowLeader, "ms_showingLeaderName", official3D);
 					SetFunctionUpvalue(BASE_MAM_ShowLeader, "ms_LastDealResponseAnimation", nil);
 					SetFunctionUpvalue(BASE_MAM_ShowLeader, "ms_bLeaderShowRequested", true);
 					LeaderSupport_Initialize();
-					Events.ShowLeaderScreen(cosmLeader, pID == Game.GetLocalPlayer());
+					Events.ShowLeaderScreen(official3D, pID == Game.GetLocalPlayer());
 					Controls.FallbackLeaderImage:SetHide(true);
 					Controls.LeaderAlpha:SetToBeginning();
 					Controls.LeaderAlpha:Play();
@@ -134,12 +135,13 @@ function UpdateSelectedPlayer(allowDeadPlayer)
 			if MAM_IsConstructorLeader(lType) then
 				local cosmLeader = MAM_ResolveCosmeticLeader(pID);
 				local cosmCiv = MAM_ResolveCosmeticCiv(pID);
-				ms_SelectedPlayerLeaderTypeName = cosmLeader;
-				SetFunctionUpvalue(BASE_MAM_UpdateSelectedPlayer, "ms_SelectedPlayerLeaderTypeName", cosmLeader);
+				local official3D = MAM_ResolveOfficialLeader(cosmLeader);
+				ms_SelectedPlayerLeaderTypeName = official3D;
+				SetFunctionUpvalue(BASE_MAM_UpdateSelectedPlayer, "ms_SelectedPlayerLeaderTypeName", official3D);
 
 				local localID = (Game and Game.GetLocalPlayer and Game.GetLocalPlayer()) or 0;
 				if pID == localID then
-					local lRow = GameInfo.Leaders[cosmLeader];
+					local lRow = GameInfo.Leaders[cosmLeader] or GameInfo.Leaders[official3D];
 					local cRow = GameInfo.Civilizations[cosmCiv];
 					if lRow and Controls.PlayerNameText then
 						Controls.PlayerNameText:LocalizeAndSetText(Locale.ToUpper(Locale.Lookup(lRow.Name)));
@@ -166,7 +168,8 @@ function PopulatePlayerPanelHeader(rootControl : table, player : table)
 			if MAM_IsConstructorLeader(lType) then
 				local cosmLeader = MAM_ResolveCosmeticLeader(pID);
 				local cosmCiv = MAM_ResolveCosmeticCiv(pID);
-				local lRow = GameInfo.Leaders[cosmLeader];
+				local official3D = MAM_ResolveOfficialLeader(cosmLeader);
+				local lRow = GameInfo.Leaders[cosmLeader] or GameInfo.Leaders[official3D];
 				local cRow = GameInfo.Civilizations[cosmCiv];
 				if lRow and rootControl.PlayerNameText then
 					rootControl.PlayerNameText:LocalizeAndSetText(Locale.ToUpper(Locale.Lookup(lRow.Name)));
@@ -197,7 +200,8 @@ function OnDiplomacyStatement(fromPlayer:number, toPlayer:number, kVariants:tabl
 		local localID = (Game and Game.GetLocalPlayer and Game.GetLocalPlayer()) or -1;
 		local otherID = (toPlayer == localID) and fromPlayer or toPlayer;
 		if otherID ~= nil and otherID >= 0 then
-			ms_OtherLeaderName = MAM_ResolveCosmeticLeader(otherID);
+			local rawCosm = MAM_ResolveCosmeticLeader(otherID);
+			ms_OtherLeaderName = MAM_ResolveOfficialLeader(rawCosm);
 		end
 	end
 end

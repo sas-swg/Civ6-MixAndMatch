@@ -50,16 +50,17 @@ function GenerateLayers(selectedPlayerID:number)
 		m_uiBackgroundLayers = {};
 		m_kBackgroundLayersIM:ResetInstances();
 
-		local leaderName = MAM_ResolveCosmeticLeader(selectedPlayerID);
+		local rawLeader = MAM_ResolveCosmeticLeader(selectedPlayerID);
+		local leaderName = MAM_ResolveOfficialLeader(rawLeader);
 		local unloadTextures : boolean = (m_oldLeaderName ~= leaderName);
 		m_oldLeaderName = leaderName;
 
-		local diplomacyInfo = GameInfo.DiplomacyInfo[leaderName];
+		local diplomacyInfo = GameInfo.DiplomacyInfo[leaderName] or GameInfo.DiplomacyInfo[rawLeader];
 		if diplomacyInfo and diplomacyInfo.BackgroundImage then
 			local layer:table = CreateBackgroundLayer(diplomacyInfo.BackgroundImage, unloadTextures);
 			table.insert(m_uiBackgroundLayers, layer);
 		else
-			local leaderRow = GameInfo.Leaders[leaderName];
+			local leaderRow = GameInfo.Leaders[leaderName] or GameInfo.Leaders[rawLeader];
 			local numLayers = (leaderRow and leaderRow.SceneLayers) or 0;
 			local baseName = string.gsub(leaderName, "LEADER_", "");
 
@@ -160,7 +161,8 @@ function OnMAMShowLeaderScreen(leaderName, isLocalPlayer)
 		if targetPid == nil or targetPid < 0 then
 			targetPid = localID;
 		end
-		local cosm = MAM_ResolveCosmeticLeader(targetPid);
+		local rawCosm = MAM_ResolveCosmeticLeader(targetPid);
+		local cosm = MAM_ResolveOfficialLeader(rawCosm);
 		Events.ShowLeaderScreen(cosm, isLocalPlayer);
 		m_isDispatchingLeaderScreen = false;
 	end

@@ -198,7 +198,7 @@ function MAM_AssignSlotsNow(reason)
 	local ids = GameConfiguration.GetParticipatingPlayerIDs and GameConfiguration.GetParticipatingPlayerIDs() or {};
 	for _, pid in ipairs(ids) do
 		local cfg = PlayerConfigurations[pid];
-		if cfg ~= nil and MAM_IsBaseConstructorLeader(MAM_LeaderOf(cfg)) and MAM_CanEditPlayerSlot(pid) then
+		if cfg ~= nil and MAM_IsBaseConstructorLeader(MAM_LeaderOf(cfg)) then
 			if MAM_ApplySlotTypes(pid) then
 				if Network and Network.BroadcastPlayerInfo then pcall(Network.BroadcastPlayerInfo, pid); end
 			end
@@ -1540,7 +1540,7 @@ function MAM_ResolveRandomForPlayer(pid, usedCivs, usedLeaders, usedUnits, usedD
 	if not MAM_IsBaseConstructorLeader(baseLeader) then
 		return;
 	end
-	if not MAM_CanEditPlayerSlot(pid) then
+	if not MAM_CanEditPlayerSlot(pid) and not (bApplySlots or g_MAM_Launching) then
 		return;
 	end
 
@@ -1637,7 +1637,7 @@ function MAM_ResolveRandomForPlayer(pid, usedCivs, usedLeaders, usedUnits, usedD
 		end
 	end
 
-	if bApplySlots then
+	if bApplySlots or g_MAM_Launching then
 		if MAM_ApplySlotTypes(pid, baseLeader) then anyChanged = true; end
 	end
 	MAM_PublishSlot(pid);
@@ -1673,12 +1673,26 @@ function MAM_ResolveRandomIfNecessary_Impl(bLaunch)
 		end
 	end
 
-	MAM_PublishAllSlots(true);
+	MAM_PublishAllSlots(not bLaunch);
 	if bLaunch and MAM_CanWriteGameConfig() then
-		MAM_SendGameConfig();
+		MAM_SendGameConfig(true);
 	end
 end
 
+
+function MAM_PrepareLaunch(reason)
+	if g_MAM_LaunchPrepared then return; end
+	g_MAM_LaunchPrepared = true;
+	g_MAM_Launching = true;
+	g_MAM_SlotLockOverride = "LAUNCH";
+	pcall(MAM_ResolveRandomIfNecessary, true);
+	pcall(MAM_AssignSlotsNow, reason or "launch");
+	g_MAM_SlotLockOverride = nil;
+	pcall(MAM_PublishAllSlots, false);
+	if MAM_CanWriteGameConfig() then
+		pcall(MAM_SendGameConfig, true);
+	end
+end
 
 function MAM_InstallGameStartHooks()
 	pcall(function()
@@ -1762,14 +1776,7 @@ function MAM_InstallGameStartHooks()
 			local _origLaunchGame = Network.LaunchGame;
 			MAM_WrappedLaunchGame = function(...)
 				MAM_Trace("Network.LaunchGame called");
-				MAM_TraceTypes("before launch");
-				if not g_MAM_LaunchPrepared then
-					g_MAM_LaunchPrepared = true;
-					g_MAM_Launching = true;
-					pcall(MAM_ResolveRandomIfNecessary, true);
-					pcall(MAM_PublishAllSlots, true);
-				end
-				MAM_TraceTypes("after launch prep");
+				MAM_PrepareLaunch("launch_game");
 				return _origLaunchGame(...);
 			end
 			Network.LaunchGame = MAM_WrappedLaunchGame;
@@ -1781,16 +1788,7 @@ function MAM_InstallGameStartHooks()
 			local _origStartLaunchCountdown = StartLaunchCountdown;
 			MAM_WrappedStartLaunchCountdown = function(...)
 				MAM_TraceTypes("countdown start");
-				g_MAM_Launching = true;
-				g_MAM_SlotLockOverride = "LAUNCH";
-				local okA, errA = pcall(MAM_AssignSlotsNow, "launch countdown");
-				if not okA then MAM_Trace("AssignSlotsNow error: " .. tostring(errA)); end
-				g_MAM_SlotLockOverride = nil;
-				if not g_MAM_LaunchPrepared then
-					g_MAM_LaunchPrepared = true;
-					pcall(MAM_PublishAllSlots, true);
-				end
-				MAM_TraceTypes("countdown slots");
+				MAM_PrepareLaunch("countdown");
 				return _origStartLaunchCountdown(...);
 			end
 			StartLaunchCountdown = MAM_WrappedStartLaunchCountdown;
@@ -1802,7 +1800,10 @@ function MAM_InstallGameStartHooks()
 			local _origStopCountdown = StopCountdown;
 			MAM_WrappedStopCountdown = function(...)
 				g_MAM_Launching = false;
-g_MAM_LaunchPrepared = false;
+				g_MAM_LaunchPrepared = false;
+				for pid = 0, MAM_MAX_SLOTS - 1 do
+					pcall(MAM_RevertSlotTypes, pid, false);
+				end
 				return _origStopCountdown(...);
 			end
 			StopCountdown = MAM_WrappedStopCountdown;
@@ -1814,10 +1815,7 @@ g_MAM_LaunchPrepared = false;
 			local _origNetworkHostGame = Network.HostGame;
 			MAM_WrappedNetworkHostGame = function(...)
 				MAM_Trace("Network.HostGame called");
-				g_MAM_Launching = true;
-				pcall(MAM_ResolveRandomIfNecessary, true);
-				pcall(MAM_PublishAllSlots, true);
-				MAM_TraceTypes("after host prep");
+				MAM_PrepareLaunch("network_host");
 				return _origNetworkHostGame(...);
 			end
 			Network.HostGame = MAM_WrappedNetworkHostGame;
@@ -1845,9 +1843,7 @@ g_MAM_LaunchPrepared = false;
 		if HostGame and HostGame ~= MAM_WrappedHostGame then
 			local _origHostGame = HostGame;
 			MAM_WrappedHostGame = function(...)
-				g_MAM_Launching = true;
-				pcall(MAM_ResolveRandomIfNecessary, true);
-				pcall(MAM_PublishAllSlots, true);
+				MAM_PrepareLaunch("host_game");
 				return _origHostGame(...);
 			end
 			HostGame = MAM_WrappedHostGame;
@@ -1857,12 +1853,7 @@ g_MAM_LaunchPrepared = false;
 		if OnStartButton and OnStartButton ~= MAM_WrappedOnStartButton then
 			local _origOnStart = OnStartButton;
 			MAM_WrappedOnStartButton = function(...)
-				if not g_MAM_LaunchPrepared then
-					g_MAM_LaunchPrepared = true;
-					g_MAM_Launching = true;
-					pcall(MAM_ResolveRandomIfNecessary, true);
-					pcall(MAM_PublishAllSlots, true);
-				end
+				MAM_PrepareLaunch("start_button");
 				return _origOnStart(...);
 			end
 			OnStartButton = MAM_WrappedOnStartButton;
@@ -3682,13 +3673,6 @@ function SetupLeaderPulldown(
 							if (v and MAM_IsMAMLeader(v)) then
 								g_MAM_ConfiguringPlayerId = playerId;
 								m_MAM_WindowClosed = false;
-								if MAM_ApplySlotTypes then
-									local baseL = MAM_IsSlotLeader(v) and "LEADER_MAM_BLANK" or (type(v)=="table" and v.Value or v);
-									MAM_ApplySlotTypes(playerId, baseL);
-									if Network and Network.BroadcastPlayerInfo then
-										pcall(Network.BroadcastPlayerInfo, playerId);
-									end
-								end
 								local pInfo = GetPlayerInfo(v.Domain, (type(v)=="table" and v.Value or v), playerId);
 								if pInfo then
 									pInfo.TargetPlayerId = playerId;
